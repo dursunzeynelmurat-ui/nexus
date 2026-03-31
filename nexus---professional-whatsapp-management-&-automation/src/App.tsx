@@ -318,6 +318,15 @@ export default function App() {
   }, [waStatus, clientId]);
 
   useEffect(() => {
+    if (!autoRefresh || waStatus !== 'open') return;
+    const interval = setInterval(() => {
+      fetchGroups();
+      fetchWaContacts();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, waStatus, clientId]);
+
+  useEffect(() => {
     localStorage.setItem(`wa_tags_${clientId}`, JSON.stringify(tagsMap));
   }, [tagsMap, clientId]);
 
@@ -346,6 +355,9 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setGroups(data);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setNotification({ message: data.error || "Gruplar alınamadı.", type: 'error' });
       }
     } catch (error) {
       console.error("Gruplar alınamadı:", error);
@@ -371,7 +383,8 @@ export default function App() {
           setNotification({ message: `Rehber güncellendi: ${data.length} kişi bulundu.`, type: 'success' });
         }
       } else {
-        console.error("Fetch WA contacts error:", res.status);
+        const data = await res.json().catch(() => ({}));
+        setNotification({ message: data.error || "WhatsApp rehberi alınamadı.", type: 'error' });
       }
     } catch (error) {
       console.error("WhatsApp rehberi alınamadı:", error);
@@ -493,6 +506,12 @@ export default function App() {
     }
   };
 
+  const getBulkDelayMs = () => {
+    const baseDelay = Math.max(1000, messageDelay);
+    const jitter = Math.floor(Math.random() * 2000); // +0-2 seconds
+    return baseDelay + jitter;
+  };
+
   const handleBulkSendGroups = async () => {
     console.log("Toplu gönderim başlatıldı", {
       waStatus,
@@ -512,6 +531,7 @@ export default function App() {
       return;
     }
     if (!currentTemplate && !selectedImage) {
+      setNotification({ message: "Lütfen bir mesaj metni veya görsel seçin.", type: 'error' });
       return;
     }
 
@@ -545,8 +565,7 @@ export default function App() {
         }
         
         if (i < selectedGroups.length - 1) {
-          const randomDelay = Math.floor(Math.random() * 3000) + 3000; // 3-6 saniye değişken bekleme
-          await new Promise(resolve => setTimeout(resolve, randomDelay));
+          await new Promise(resolve => setTimeout(resolve, getBulkDelayMs()));
         }
       }
       
@@ -574,6 +593,7 @@ export default function App() {
       return;
     }
     if (!currentTemplate && !selectedImage) {
+      setNotification({ message: "Lütfen bir mesaj metni veya görsel seçin.", type: 'error' });
       return;
     }
 
@@ -602,8 +622,7 @@ export default function App() {
         if (success) successCount++;
         
         if (i < selectedWaContacts.length - 1) {
-          const randomDelay = Math.floor(Math.random() * 3000) + 3000; // 3-6 saniye değişken bekleme
-          await new Promise(resolve => setTimeout(resolve, randomDelay));
+          await new Promise(resolve => setTimeout(resolve, getBulkDelayMs()));
         }
       }
       
