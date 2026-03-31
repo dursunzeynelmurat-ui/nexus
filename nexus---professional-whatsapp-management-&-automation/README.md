@@ -118,3 +118,11 @@ curl http://127.0.0.1:3000/healthz
 
 WhatsApp auth/session files (`auth_info_*`, `contacts_*.json`, `groups_*.json`) are stored on local disk.  
 Do not wipe server disk if session continuity is required.
+
+### 8) Consent log storage
+
+The app includes an explicit-consent log form under **Ayarlar**. Approved records are written server-side to:
+
+- `.secure-consents/explicit-consents.jsonl`
+
+This path is intentionally outside public web assets and created with restricted file permissions where supported.

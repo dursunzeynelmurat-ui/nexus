@@ -157,6 +157,12 @@ export default function App() {
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(Boolean(localStorage.getItem('wa_admin_token')));
   const [adminSessions, setAdminSessions] = useState<any[]>([]);
   const [adminLinks, setAdminLinks] = useState<AdminLink[]>([]);
+  const [consentFullName, setConsentFullName] = useState('');
+  const [consentPhone, setConsentPhone] = useState('');
+  const [consentText, setConsentText] = useState(
+    'Ticari elektronik ileti ve kampanya bilgilendirmeleri için WhatsApp üzerinden tarafıma mesaj gönderilmesini kabul ediyorum.',
+  );
+  const [consentAccepted, setConsentAccepted] = useState(false);
 
   const isWhatsappReady = waStatus === 'open';
 
@@ -430,6 +436,36 @@ export default function App() {
     localStorage.setItem('wa_admin_token', data.token);
     setAdminToken(data.token);
     setIsAdminLoggedIn(true);
+  };
+
+  const submitConsentLog = async () => {
+    if (!consentAccepted) {
+      setNotification({ message: 'Log kaydı için açık rıza onayı zorunludur.', type: 'error' });
+      return;
+    }
+
+    const res = await fetch('/api/privacy/consent-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-client-id': clientId },
+      body: JSON.stringify({
+        fullName: consentFullName,
+        phone: consentPhone,
+        consentText,
+        consentAccepted: true,
+        consentVersion: 'v1',
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setNotification({ message: data.error || 'Açık rıza log kaydı başarısız.', type: 'error' });
+      return;
+    }
+
+    setNotification({ message: 'Açık rıza kaydı güvenli sunucu alanına yazıldı.', type: 'success' });
+    setConsentFullName('');
+    setConsentPhone('');
+    setConsentAccepted(false);
   };
 
   const refreshAdminSessions = async () => {
@@ -780,6 +816,37 @@ export default function App() {
               <label className="block text-sm text-slate-300">Mesajlar arası gecikme: {delayMs} ms</label>
               <input type="range" min={1000} max={10000} step={500} value={delayMs} onChange={e => setDelayMs(Number(e.target.value))} className="w-full" />
               <p className="text-xs text-slate-400">Toplu gönderimde anti-spam için ek rastgele gecikme uygulanır.</p>
+
+              <div className="space-y-3 rounded-xl border border-emerald-400/20 bg-emerald-500/5 p-3">
+                <h3 className="text-sm font-semibold text-emerald-300">Reklam İzni (Açık Rıza) Log Kaydı</h3>
+                <p className="text-xs text-slate-300">
+                  Yalnızca formu dolduran kişinin verisini kaydedin. Üçüncü kişilerin rehber verilerini içe aktarmayın.
+                </p>
+                <input
+                  value={consentFullName}
+                  onChange={e => setConsentFullName(e.target.value)}
+                  placeholder="Ad Soyad"
+                  className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm"
+                />
+                <input
+                  value={consentPhone}
+                  onChange={e => setConsentPhone(e.target.value)}
+                  placeholder="Telefon (+905xxxxxxxxx)"
+                  className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm"
+                />
+                <textarea
+                  value={consentText}
+                  onChange={e => setConsentText(e.target.value)}
+                  className="h-24 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs"
+                />
+                <label className="flex items-start gap-2 text-xs text-slate-200">
+                  <input type="checkbox" checked={consentAccepted} onChange={e => setConsentAccepted(e.target.checked)} className="mt-0.5" />
+                  Bu kişiden reklam/iletişim amacıyla açık rıza alındığını onaylıyorum.
+                </label>
+                <button onClick={submitConsentLog} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950">
+                  Açık Rıza Kaydını Logla
+                </button>
+              </div>
             </div>
           )}
 
