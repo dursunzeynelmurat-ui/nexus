@@ -42,6 +42,8 @@ interface Session {
   const sessions = new Map<string, Session>();
   const GROUP_CACHE_TTL = 5 * 60 * 1000;
   const ADMIN_LINKS_PATH = "admin_links.json";
+  const CONSENT_LOG_DIR = path.join(process.cwd(), ".secure-consents");
+  const CONSENT_LOG_FILE = path.join(CONSENT_LOG_DIR, "explicit-consents.jsonl");
 
   type AdminLink = {
     id: string;
@@ -191,6 +193,28 @@ interface Session {
   };
 
   const logger = pino({ level: 'silent' });
+
+  const ensureConsentStorage = () => {
+    if (!fs.existsSync(CONSENT_LOG_DIR)) {
+      fs.mkdirSync(CONSENT_LOG_DIR, { recursive: true, mode: 0o700 });
+    }
+    try {
+      fs.chmodSync(CONSENT_LOG_DIR, 0o700);
+    } catch {
+      // ignore chmod errors on non-posix filesystems
+    }
+  };
+
+  const appendConsentLog = (payload: Record<string, unknown>) => {
+    ensureConsentStorage();
+    const line = `${JSON.stringify(payload)}\n`;
+    fs.appendFileSync(CONSENT_LOG_FILE, line, { encoding: "utf-8", mode: 0o600 });
+    try {
+      fs.chmodSync(CONSENT_LOG_FILE, 0o600);
+    } catch {
+      // ignore chmod errors on non-posix filesystems
+    }
+  };
 
   async function connectToWhatsApp(sessionId: string) {
     const session = getOrCreateSession(sessionId);
@@ -639,6 +663,48 @@ interface Session {
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
+  });
+
+  app.post('/api/privacy/consent-log', (req, res) => {
+    const sessionId = getSessionId(req);
+    const { fullName, phone, consentText, consentAccepted, consentVersion } = req.body || {};
+
+    if (!consentAccepted) {
+      return res.status(400).json({ error: 'Açık rıza onayı zorunludur.' });
+    }
+
+    if (typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.trim().length > 120) {
+      return res.status(400).json({ error: 'Geçerli bir ad soyad giriniz.' });
+    }
+
+    if (typeof phone !== 'string') {
+      return res.status(400).json({ error: 'Telefon numarası zorunludur.' });
+    }
+    const normalizedPhone = phone.replace(/[^\d+]/g, '');
+    if (normalizedPhone.length < 10 || normalizedPhone.length > 20) {
+      return res.status(400).json({ error: 'Geçerli bir telefon numarası giriniz.' });
+    }
+
+    if (typeof consentText !== 'string' || consentText.trim().length < 10 || consentText.trim().length > 3000) {
+      return res.status(400).json({ error: 'Açık rıza metni zorunludur.' });
+    }
+
+    appendConsentLog({
+      fullName: fullName.trim(),
+      phone: normalizedPhone,
+      consentText: consentText.trim(),
+      consentVersion: typeof consentVersion === 'string' && consentVersion.trim().length > 0 ? consentVersion.trim() : 'v1',
+      consentAccepted: true,
+      channel: 'ad_campaign',
+      sessionId,
+      ip:
+        (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ||
+        req.socket.remoteAddress ||
+        'unknown',
+      createdAt: new Date().toISOString(),
+    });
+
+    res.json({ success: true });
   });
 
   app.post('/api/whatsapp/logout', async (req, res) => {
