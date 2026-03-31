@@ -181,6 +181,8 @@ export default function App() {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminUsername, setAdminUsername] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
+  const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('wa_admin_token'));
+  const [isAdminConfigured, setIsAdminConfigured] = useState(true);
   const [adminSessions, setAdminSessions] = useState<any[]>([]);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
 
@@ -195,6 +197,21 @@ export default function App() {
       }
     }
   }, [waStatus, clientId]);
+
+  useEffect(() => {
+    fetch('/api/admin/configured')
+      .then(res => res.json())
+      .then(data => setIsAdminConfigured(Boolean(data.configured)))
+      .catch(() => setIsAdminConfigured(false));
+  }, []);
+
+  useEffect(() => {
+    if (adminToken && !isAdminLoggedIn) {
+      setIsAdminLoggedIn(true);
+      fetchAdminSessions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken]);
 
   const closeTutorial = () => {
     localStorage.setItem(`velo_tutorial_${clientId}`, 'true');
@@ -692,7 +709,10 @@ export default function App() {
     try {
       await fetch('/api/whatsapp/clear-all', { 
         method: 'POST',
-        headers: { 'x-client-id': clientId }
+        headers: { 
+          'x-client-id': clientId,
+          ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {})
+        }
       });
       
       // Clear local storage
@@ -711,24 +731,54 @@ export default function App() {
     }
   };
 
-  const handleAdminLogin = () => {
-    if (adminUsername === 'zmdursun' && adminPassword === 'Safak21+') {
+  const adminFetch = (url: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers || {});
+    if (adminToken) {
+      headers.set('Authorization', `Bearer ${adminToken}`);
+    }
+    return fetch(url, { ...init, headers });
+  };
+
+  const handleAdminLogin = async () => {
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: adminUsername, password: adminPassword })
+      });
+
+      if (!response.ok) {
+        setNotification({ message: 'Hatalı kullanıcı adı veya şifre.', type: 'error' });
+        return;
+      }
+
+      const data = await response.json();
+      if (data.token) {
+        localStorage.setItem('wa_admin_token', data.token);
+        setAdminToken(data.token);
+      }
       setIsAdminLoggedIn(true);
       setShowAdminLogin(false);
       fetchAdminSessions();
       setNotification({ message: 'Admin girişi başarılı.', type: 'success' });
-    } else {
-      setNotification({ message: 'Hatalı kullanıcı adı veya şifre.', type: 'error' });
+    } catch (error) {
+      console.error(error);
+      setNotification({ message: 'Admin girişi sırasında bir hata oluştu.', type: 'error' });
     }
   };
 
   const fetchAdminSessions = async () => {
     setIsAdminLoading(true);
     try {
-      const response = await fetch('/api/admin/sessions');
+      const response = await adminFetch('/api/admin/sessions');
       if (response.ok) {
         const data = await response.json();
         setAdminSessions(data);
+      } else if (response.status === 401) {
+        localStorage.removeItem('wa_admin_token');
+        setAdminToken(null);
+        setIsAdminLoggedIn(false);
+        setNotification({ message: 'Admin oturumu sona erdi. Lütfen tekrar giriş yapın.', type: 'error' });
       }
     } catch (error) {
       console.error('Failed to fetch admin sessions:', error);
@@ -740,7 +790,7 @@ export default function App() {
   const handleDeleteSession = async (sessionId: string) => {
     if (!window.confirm(`Oturumu silmek istediğinize emin misiniz? (${sessionId})`)) return;
     try {
-      const response = await fetch('/api/admin/delete-session', {
+      const response = await adminFetch('/api/admin/delete-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId })
@@ -757,7 +807,7 @@ export default function App() {
   const handleLogoutSession = async (sessionId: string) => {
     if (!window.confirm(`Oturumu kapatmak (çıkış yaptırmak) istediğinize emin misiniz? (${sessionId})`)) return;
     try {
-      const response = await fetch('/api/admin/logout-session', {
+      const response = await adminFetch('/api/admin/logout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId })
@@ -936,7 +986,11 @@ export default function App() {
                   Sıfırla
                 </button>
                 <button 
-                  onClick={() => setIsAdminLoggedIn(false)}
+                  onClick={() => {
+                    localStorage.removeItem('wa_admin_token');
+                    setAdminToken(null);
+                    setIsAdminLoggedIn(false);
+                  }}
                   className="flex items-center gap-2 px-6 py-3 bg-[#334155] border border-[#475569] rounded-xl text-sm font-bold text-slate-200 hover:bg-[#475569] transition-all"
                 >
                   <LogOut size={18} />
@@ -1058,13 +1112,19 @@ export default function App() {
                 </div>
 
                 <div className="pt-4 border-t border-[#334155] flex flex-col gap-4">
-                  <button 
-                    onClick={() => setShowAdminLogin(true)}
-                    className="text-xs text-slate-500 hover:text-slate-300 font-medium transition-colors flex items-center gap-1 mx-auto"
-                  >
-                    <Settings size={12} />
-                    Yönetici Girişi
-                  </button>
+                  {isAdminConfigured ? (
+                    <button 
+                      onClick={() => setShowAdminLogin(true)}
+                      className="text-xs text-slate-500 hover:text-slate-300 font-medium transition-colors flex items-center gap-1 mx-auto"
+                    >
+                      <Settings size={12} />
+                      Yönetici Girişi
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-amber-400 text-center">
+                      Yönetici girişi sunucuda yapılandırılmamış.
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -2352,10 +2412,11 @@ export default function App() {
                   </p>
                   <button 
                     onClick={() => setShowAdminLogin(true)}
+                    disabled={!isAdminConfigured}
                     className="w-full py-3 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl font-bold text-sm hover:bg-purple-500/20 transition-all flex items-center justify-center gap-2"
                   >
                     <Shield size={18} />
-                    Yönetici Paneline Git
+                    {isAdminConfigured ? 'Yönetici Paneline Git' : 'Yönetici Yapılandırılmadı'}
                   </button>
                 </div>
 

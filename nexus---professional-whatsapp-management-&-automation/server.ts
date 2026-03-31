@@ -3,6 +3,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import crypto from "crypto";
+import dotenv from "dotenv";
 import { 
   makeWASocket, 
   useMultiFileAuthState, 
@@ -14,10 +16,14 @@ import pino from "pino";
 import fs from "fs";
 
 async function startServer() {
+  dotenv.config();
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer);
   const PORT = 3000;
+  const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+  const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || "change-me-in-production";
 
   app.use(express.json({ limit: '50mb' }));
 
@@ -35,6 +41,54 @@ async function startServer() {
 
   const sessions = new Map<string, Session>();
   const GROUP_CACHE_TTL = 5 * 60 * 1000;
+
+  const hasAdminConfig = Boolean(ADMIN_USERNAME && ADMIN_PASSWORD);
+
+  const secureEquals = (a: string, b: string): boolean => {
+    const aBuffer = Buffer.from(a, "utf-8");
+    const bBuffer = Buffer.from(b, "utf-8");
+    if (aBuffer.length !== bBuffer.length) return false;
+    return crypto.timingSafeEqual(aBuffer, bBuffer);
+  };
+
+  const createAdminToken = () => {
+    const payload = {
+      username: ADMIN_USERNAME,
+      exp: Date.now() + 8 * 60 * 60 * 1000, // 8 hours
+    };
+    const payloadEncoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const signature = crypto.createHmac("sha256", ADMIN_TOKEN_SECRET).update(payloadEncoded).digest("base64url");
+    return `${payloadEncoded}.${signature}`;
+  };
+
+  const verifyAdminToken = (token: string): boolean => {
+    try {
+      const [payloadEncoded, signature] = token.split(".");
+      if (!payloadEncoded || !signature) return false;
+      const expectedSignature = crypto.createHmac("sha256", ADMIN_TOKEN_SECRET).update(payloadEncoded).digest("base64url");
+      if (!secureEquals(signature, expectedSignature)) return false;
+      const payload = JSON.parse(Buffer.from(payloadEncoded, "base64url").toString("utf-8"));
+      if (!payload?.exp || Date.now() > payload.exp) return false;
+      if (payload?.username !== ADMIN_USERNAME) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const enforceAdminAuth = (req: express.Request, res: express.Response): boolean => {
+    if (!hasAdminConfig) {
+      res.status(503).json({ error: "Admin access is not configured on the server." });
+      return false;
+    }
+    const authorization = req.headers.authorization || "";
+    const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    if (!token || !verifyAdminToken(token)) {
+      res.status(401).json({ error: "Unauthorized admin request." });
+      return false;
+    }
+    return true;
+  };
 
   function getSessionId(req: any): string {
     // Prioritize client-provided ID for browser/computer isolation
@@ -296,7 +350,27 @@ async function startServer() {
   });
 
   // Admin API Routes
+  app.get('/api/admin/configured', (req, res) => {
+    res.json({ configured: hasAdminConfig });
+  });
+
+  app.post('/api/admin/login', (req, res) => {
+    if (!hasAdminConfig) {
+      return res.status(503).json({ error: 'Admin access is not configured on the server.' });
+    }
+    const { username, password } = req.body || {};
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+    if (!secureEquals(username, ADMIN_USERNAME!) || !secureEquals(password, ADMIN_PASSWORD!)) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+    res.json({ token: createAdminToken() });
+  });
+
   app.get('/api/admin/sessions', (req, res) => {
+    if (!enforceAdminAuth(req, res)) return;
+
     const sessionList = Array.from(sessions.entries()).map(([id, session]) => ({
       id,
       userName: session.userName,
@@ -331,6 +405,8 @@ async function startServer() {
   });
 
   app.post('/api/admin/logout-session', (req, res) => {
+    if (!enforceAdminAuth(req, res)) return;
+
     const { sessionId } = req.body;
     if (!sessionId) return res.status(400).json({ error: 'Session ID required' });
 
@@ -352,6 +428,8 @@ async function startServer() {
   });
 
   app.post('/api/admin/delete-session', (req, res) => {
+    if (!enforceAdminAuth(req, res)) return;
+
     const { sessionId } = req.body;
     if (!sessionId) return res.status(400).json({ error: 'Session ID required' });
 
@@ -376,6 +454,8 @@ async function startServer() {
   });
 
   app.post('/api/whatsapp/clear-all', (req, res) => {
+    if (!enforceAdminAuth(req, res)) return;
+
     const files = fs.readdirSync(process.cwd());
     const authDirs = files.filter(f => f.startsWith('auth_info_') && fs.statSync(f).isDirectory());
     for (const dir of authDirs) {
