@@ -23,7 +23,7 @@ async function startServer() {
   const PORT = 3000;
   const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
   const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-  const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || "change-me-in-production";
+  const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET;
 
   app.use(express.json({ limit: '50mb' }));
 
@@ -43,6 +43,9 @@ async function startServer() {
   const GROUP_CACHE_TTL = 5 * 60 * 1000;
 
   const hasAdminConfig = Boolean(ADMIN_USERNAME && ADMIN_PASSWORD);
+  if (hasAdminConfig && !ADMIN_TOKEN_SECRET) {
+    throw new Error("ADMIN_TOKEN_SECRET must be set when ADMIN_USERNAME/ADMIN_PASSWORD are configured.");
+  }
 
   const secureEquals = (a: string, b: string): boolean => {
     const aBuffer = Buffer.from(a, "utf-8");
@@ -57,7 +60,7 @@ async function startServer() {
       exp: Date.now() + 8 * 60 * 60 * 1000, // 8 hours
     };
     const payloadEncoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-    const signature = crypto.createHmac("sha256", ADMIN_TOKEN_SECRET).update(payloadEncoded).digest("base64url");
+    const signature = crypto.createHmac("sha256", ADMIN_TOKEN_SECRET as string).update(payloadEncoded).digest("base64url");
     return `${payloadEncoded}.${signature}`;
   };
 
@@ -65,7 +68,7 @@ async function startServer() {
     try {
       const [payloadEncoded, signature] = token.split(".");
       if (!payloadEncoded || !signature) return false;
-      const expectedSignature = crypto.createHmac("sha256", ADMIN_TOKEN_SECRET).update(payloadEncoded).digest("base64url");
+      const expectedSignature = crypto.createHmac("sha256", ADMIN_TOKEN_SECRET as string).update(payloadEncoded).digest("base64url");
       if (!secureEquals(signature, expectedSignature)) return false;
       const payload = JSON.parse(Buffer.from(payloadEncoded, "base64url").toString("utf-8"));
       if (!payload?.exp || Date.now() > payload.exp) return false;

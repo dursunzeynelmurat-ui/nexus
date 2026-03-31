@@ -736,10 +736,11 @@ export default function App() {
     }
   };
 
-  const adminFetch = (url: string, init: RequestInit = {}) => {
+  const adminFetch = (url: string, init: RequestInit = {}, tokenOverride?: string | null) => {
     const headers = new Headers(init.headers || {});
-    if (adminToken) {
-      headers.set('Authorization', `Bearer ${adminToken}`);
+    const tokenToUse = tokenOverride ?? adminToken;
+    if (tokenToUse) {
+      headers.set('Authorization', `Bearer ${tokenToUse}`);
     }
     return fetch(url, { ...init, headers });
   };
@@ -758,13 +759,20 @@ export default function App() {
       }
 
       const data = await response.json();
-      if (data.token) {
-        localStorage.setItem('wa_admin_token', data.token);
-        setAdminToken(data.token);
+      if (!data.token) {
+        setNotification({ message: 'Geçersiz admin yanıtı alındı.', type: 'error' });
+        return;
       }
+
+      localStorage.setItem('wa_admin_token', data.token);
+      setAdminToken(data.token);
+      const sessionFetchSuccess = await fetchAdminSessions(data.token);
+      if (!sessionFetchSuccess) {
+        return;
+      }
+
       setIsAdminLoggedIn(true);
       setShowAdminLogin(false);
-      fetchAdminSessions();
       setNotification({ message: 'Admin girişi başarılı.', type: 'success' });
     } catch (error) {
       console.error(error);
@@ -772,21 +780,24 @@ export default function App() {
     }
   };
 
-  const fetchAdminSessions = async () => {
+  const fetchAdminSessions = async (tokenOverride?: string | null) => {
     setIsAdminLoading(true);
     try {
-      const response = await adminFetch('/api/admin/sessions');
+      const response = await adminFetch('/api/admin/sessions', {}, tokenOverride);
       if (response.ok) {
         const data = await response.json();
         setAdminSessions(data);
+        return true;
       } else if (response.status === 401) {
         localStorage.removeItem('wa_admin_token');
         setAdminToken(null);
         setIsAdminLoggedIn(false);
         setNotification({ message: 'Admin oturumu sona erdi. Lütfen tekrar giriş yapın.', type: 'error' });
       }
+      return false;
     } catch (error) {
       console.error('Failed to fetch admin sessions:', error);
+      return false;
     } finally {
       setIsAdminLoading(false);
     }
