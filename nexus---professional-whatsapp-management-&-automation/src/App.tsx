@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { io } from 'socket.io-client';
+import nexusMark from './assets/nexus-mark.svg';
 
 type Tab = 'dashboard' | 'groups' | 'contacts' | 'templates' | 'scheduler' | 'history' | 'whatsapp' | 'settings';
 
@@ -64,6 +65,21 @@ interface HistoryItem {
 interface Notification {
   message: string;
   type: 'success' | 'error' | 'info';
+}
+
+function NexusLogo({dark = false, compact = false}: {dark?: boolean; compact?: boolean}) {
+  return (
+    <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
+      <img src={nexusMark} alt="Nexus logo" className={compact ? 'h-8 w-8' : 'h-10 w-10'} />
+      <span
+        className={`font-semibold tracking-wide ${compact ? 'text-lg' : 'text-xl'} ${
+          dark ? 'text-white' : 'text-slate-200'
+        }`}
+      >
+        nexus
+      </span>
+    </div>
+  );
 }
 
 const readStorage = <T,>(key: string, fallback: T): T => {
@@ -353,9 +369,8 @@ export default function App() {
 
       <div className="mx-auto flex w-full max-w-[1500px] gap-4 p-4 md:p-6">
         <aside className="hidden w-64 shrink-0 rounded-3xl border border-white/10 bg-slate-900/70 p-4 backdrop-blur lg:block">
-          <div className="mb-4 flex items-center gap-2 border-b border-white/10 pb-4 text-emerald-400">
-            <Activity size={24} />
-            <span className="text-xl font-bold">Nexus</span>
+          <div className="mb-4 border-b border-white/10 pb-4">
+            <NexusLogo dark compact />
           </div>
           <nav className="space-y-2">
             {nav.map(item => {
@@ -383,6 +398,7 @@ export default function App() {
         <main className="flex-1 rounded-3xl border border-white/10 bg-slate-950/70 p-4 md:p-6 backdrop-blur-xl">
           <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
+              <NexusLogo dark />
               <h1 className="text-2xl font-bold">Nexus Professional Console</h1>
               <p className="text-sm text-slate-400">Son kullanıcı için optimize edilmiş yeni kontrol deneyimi.</p>
             </div>
