@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+dist
+.git
+.gitignore
+.env
+.env.*
+*.local
+auth_info_*
+contacts_*.json
+groups_*.json
+info_*.json
