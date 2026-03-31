@@ -6,10 +6,14 @@ import {
   Clock,
   FileText,
   History,
+  Link2,
+  ListChecks,
   LogOut,
   MessageSquare,
+  Pencil,
   QrCode,
   RefreshCw,
+  Save,
   Send,
   Settings,
   Shield,
@@ -21,7 +25,7 @@ import {
 import { io } from 'socket.io-client';
 import nexusMark from './assets/nexus-mark.svg';
 
-type Tab = 'dashboard' | 'groups' | 'contacts' | 'templates' | 'scheduler' | 'history' | 'whatsapp' | 'settings';
+type Tab = 'dashboard' | 'groups' | 'contacts' | 'lists' | 'templates' | 'scheduler' | 'history' | 'whatsapp' | 'settings';
 
 interface Contact {
   id: string;
@@ -67,15 +71,23 @@ interface Notification {
   type: 'success' | 'error' | 'info';
 }
 
-function NexusLogo({dark = false, compact = false}: {dark?: boolean; compact?: boolean}) {
+interface TargetList {
+  id: string;
+  name: string;
+  items: Array<{ id: string; name: string; phone: string; isGroup: boolean }>;
+}
+
+interface AdminLink {
+  id: string;
+  label: string;
+  url: string;
+}
+
+function NexusLogo({ dark = false, compact = false }: { dark?: boolean; compact?: boolean }) {
   return (
     <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
       <img src={nexusMark} alt="Nexus logo" className={compact ? 'h-8 w-8' : 'h-10 w-10'} />
-      <span
-        className={`font-semibold tracking-wide ${compact ? 'text-lg' : 'text-xl'} ${
-          dark ? 'text-white' : 'text-slate-200'
-        }`}
-      >
+      <span className={`font-semibold tracking-wide ${compact ? 'text-lg' : 'text-xl'} ${dark ? 'text-white' : 'text-slate-200'}`}>
         nexus
       </span>
     </div>
@@ -102,7 +114,7 @@ const createClientId = () => {
 
 export default function App() {
   const [clientId] = useState(createClientId);
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTab] = useState<Tab>('whatsapp');
   const [waStatus, setWaStatus] = useState<'connecting' | 'open' | 'close' | 'qr'>('close');
   const [waQR, setWaQR] = useState<string | null>(null);
   const [waSessionId, setWaSessionId] = useState<string | null>(null);
@@ -123,7 +135,14 @@ export default function App() {
   const [delayMs, setDelayMs] = useState(2500);
   const [scheduleAt, setScheduleAt] = useState('');
   const [scheduled, setScheduled] = useState<ScheduledMessage[]>(() => readStorage(`wa_scheduled_${createClientId()}`, []));
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [editingScheduleDate, setEditingScheduleDate] = useState('');
+  const [editingScheduleMessage, setEditingScheduleMessage] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>(() => readStorage(`wa_history_${createClientId()}`, []));
+
+  const [targetLists, setTargetLists] = useState<TargetList[]>(() => readStorage(`wa_target_lists_${createClientId()}`, []));
+  const [listName, setListName] = useState('');
+  const [selectedListId, setSelectedListId] = useState('');
 
   const [notification, setNotification] = useState<Notification | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -135,6 +154,9 @@ export default function App() {
   const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('wa_admin_token'));
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(Boolean(localStorage.getItem('wa_admin_token')));
   const [adminSessions, setAdminSessions] = useState<any[]>([]);
+  const [adminLinks, setAdminLinks] = useState<AdminLink[]>([]);
+
+  const isWhatsappReady = waStatus === 'open';
 
   useEffect(() => {
     localStorage.setItem(`wa_templates_${clientId}`, JSON.stringify(templates));
@@ -149,10 +171,21 @@ export default function App() {
   }, [history, clientId]);
 
   useEffect(() => {
+    localStorage.setItem(`wa_target_lists_${clientId}`, JSON.stringify(targetLists));
+  }, [targetLists, clientId]);
+
+  useEffect(() => {
     if (!notification) return;
     const timer = setTimeout(() => setNotification(null), 4000);
     return () => clearTimeout(timer);
   }, [notification]);
+
+  useEffect(() => {
+    if (!isWhatsappReady && tab !== 'whatsapp') {
+      setTab('whatsapp');
+      setNotification({ message: 'Ana panel özellikleri için önce QR ile WhatsApp bağlantısı açılmalıdır.', type: 'info' });
+    }
+  }, [isWhatsappReady, tab]);
 
   useEffect(() => {
     const socket = io({
@@ -270,7 +303,7 @@ export default function App() {
         const ok = await sendMessage(item.targetPhone, item.message, item.isGroup);
         setScheduled(prev => prev.map(s => (s.id === item.id ? { ...s, status: ok ? 'sent' : 'failed' } : s)));
       }
-    }, 60000);
+    }, 30000);
 
     return () => clearInterval(timer);
   }, [scheduled]);
@@ -284,6 +317,8 @@ export default function App() {
     () => groups.filter(g => selectedGroups.includes(g.id)).map(g => ({ id: g.id, name: g.name, phone: g.id, isGroup: true })),
     [groups, selectedGroups],
   );
+
+  const selectedRows = useMemo(() => [...selectedContactRows, ...selectedGroupRows], [selectedContactRows, selectedGroupRows]);
 
   const createSchedule = (target: { id: string; name: string; phone: string; isGroup: boolean }) => {
     if (!scheduleAt || !currentMessage.trim()) {
@@ -303,6 +338,51 @@ export default function App() {
     setNotification({ message: `${target.name} için planlama oluşturuldu.`, type: 'success' });
   };
 
+  const startEditingSchedule = (item: ScheduledMessage) => {
+    setEditingScheduleId(item.id);
+    setEditingScheduleDate(item.scheduledTime.slice(0, 16));
+    setEditingScheduleMessage(item.message);
+  };
+
+  const saveScheduleEdit = (id: string) => {
+    if (!editingScheduleDate || !editingScheduleMessage.trim()) {
+      setNotification({ message: 'Düzenleme için tarih ve mesaj gereklidir.', type: 'error' });
+      return;
+    }
+    setScheduled(prev => prev.map(item => (item.id === id ? { ...item, scheduledTime: editingScheduleDate, message: editingScheduleMessage, status: 'pending' } : item)));
+    setEditingScheduleId(null);
+    setNotification({ message: 'Planlanan işlem güncellendi.', type: 'success' });
+  };
+
+  const deleteSchedule = (id: string) => {
+    setScheduled(prev => prev.filter(item => item.id !== id));
+    if (editingScheduleId === id) setEditingScheduleId(null);
+    setNotification({ message: 'Planlanan işlem silindi.', type: 'info' });
+  };
+
+  const createListFromSelection = () => {
+    if (!listName.trim()) {
+      setNotification({ message: 'Liste adı zorunlu.', type: 'error' });
+      return;
+    }
+    if (selectedRows.length === 0) {
+      setNotification({ message: 'Liste oluşturmak için en az bir grup/kişi seçin.', type: 'error' });
+      return;
+    }
+    setTargetLists(prev => [{ id: `l_${Date.now()}`, name: listName.trim(), items: selectedRows }, ...prev]);
+    setListName('');
+    setNotification({ message: 'Liste oluşturuldu.', type: 'success' });
+  };
+
+  const sendToList = async () => {
+    const list = targetLists.find(item => item.id === selectedListId);
+    if (!list) {
+      setNotification({ message: 'Önce bir liste seçin.', type: 'error' });
+      return;
+    }
+    await bulkSend(list.items);
+  };
+
   const handleLogout = async () => {
     await fetch('/api/whatsapp/logout', { method: 'POST', headers: { 'x-client-id': clientId } });
     setWaStatus('close');
@@ -311,6 +391,7 @@ export default function App() {
     setContacts([]);
     setSelectedGroups([]);
     setSelectedContacts([]);
+    setTab('whatsapp');
   };
 
   const handleAdminLogin = async () => {
@@ -327,7 +408,6 @@ export default function App() {
     localStorage.setItem('wa_admin_token', data.token);
     setAdminToken(data.token);
     setIsAdminLoggedIn(true);
-    setIsAdminModalOpen(false);
   };
 
   const refreshAdminSessions = async () => {
@@ -335,14 +415,40 @@ export default function App() {
     if (res.ok) setAdminSessions(await res.json());
   };
 
+  const refreshAdminLinks = async () => {
+    const res = await adminFetch('/api/admin/links');
+    if (res.ok) setAdminLinks(await res.json());
+  };
+
+  const saveAdminLinks = async () => {
+    const normalized = adminLinks
+      .map(item => ({ ...item, label: item.label.trim(), url: item.url.trim() }))
+      .filter(item => item.label && item.url);
+    const res = await adminFetch('/api/admin/links', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ links: normalized }),
+    });
+    if (!res.ok) {
+      setNotification({ message: 'Bağlantılar kaydedilemedi.', type: 'error' });
+      return;
+    }
+    setAdminLinks(normalized);
+    setNotification({ message: 'Admin bağlantıları kaydedildi.', type: 'success' });
+  };
+
   useEffect(() => {
-    if (isAdminLoggedIn) refreshAdminSessions();
+    if (isAdminLoggedIn) {
+      refreshAdminSessions();
+      refreshAdminLinks();
+    }
   }, [isAdminLoggedIn]);
 
   const nav = [
     { id: 'dashboard' as Tab, label: 'Panel', icon: Activity },
     { id: 'groups' as Tab, label: 'Gruplar', icon: Users2 },
     { id: 'contacts' as Tab, label: 'Rehber', icon: User },
+    { id: 'lists' as Tab, label: 'Listeler', icon: ListChecks },
     { id: 'templates' as Tab, label: 'Şablonlar', icon: FileText },
     { id: 'scheduler' as Tab, label: 'Planlayıcı', icon: Clock },
     { id: 'history' as Tab, label: 'Geçmiş', icon: History },
@@ -375,11 +481,13 @@ export default function App() {
           <nav className="space-y-2">
             {nav.map(item => {
               const Icon = item.icon;
+              const isLocked = !isWhatsappReady && item.id !== 'whatsapp';
               return (
                 <button
                   key={item.id}
                   onClick={() => setTab(item.id)}
-                  className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${tab === item.id ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 font-semibold text-white' : 'text-slate-300 hover:bg-white/10'}`}
+                  disabled={isLocked}
+                  className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${tab === item.id ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 font-semibold text-white' : 'text-slate-300 hover:bg-white/10'} ${isLocked ? 'cursor-not-allowed opacity-40' : ''}`}
                 >
                   <Icon size={16} />
                   {item.label}
@@ -403,7 +511,7 @@ export default function App() {
               <p className="text-sm text-slate-400">Son kullanıcı için optimize edilmiş yeni kontrol deneyimi.</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={fetchContactsAndGroups} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"><RefreshCw size={14} /> Yenile</button>
+              <button onClick={fetchContactsAndGroups} disabled={!isWhatsappReady} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw size={14} /> Yenile</button>
               <button onClick={() => setIsAdminModalOpen(true)} className="inline-flex items-center gap-2 rounded-lg border border-purple-400/30 bg-purple-400/10 px-3 py-2 text-sm text-purple-300 hover:bg-purple-400/20"><Shield size={14} /> Admin</button>
               <button onClick={handleLogout} className="inline-flex items-center gap-2 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-300 hover:bg-red-400/20"><LogOut size={14} /> Çıkış</button>
             </div>
@@ -465,6 +573,43 @@ export default function App() {
             </div>
           )}
 
+          {tab === 'lists' && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <h2 className="mb-2 font-semibold">Liste Oluştur</h2>
+                <p className="mb-3 text-xs text-slate-400">Gruplar ve Rehber sekmelerinde seçtiğiniz kayıtlar bu listeye eklenir.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input value={listName} onChange={e => setListName(e.target.value)} placeholder="Liste adı" className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm" />
+                  <button onClick={createListFromSelection} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white">Seçililerle Listeyi Kaydet</button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                <h2 className="font-semibold">Listeye Mesaj Gönder</h2>
+                <textarea value={currentMessage} onChange={e => setCurrentMessage(e.target.value)} className="h-24 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm" placeholder="Listeye gönderilecek mesaj taslağı" />
+                <select value={selectedListId} onChange={e => setSelectedListId(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
+                  <option value="">Liste seçin</option>
+                  {targetLists.map(list => (
+                    <option key={list.id} value={list.id}>{list.name} ({list.items.length})</option>
+                  ))}
+                </select>
+                <button disabled={!selectedListId || isSending} onClick={sendToList} className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send size={14} /> Seçili Listeye Gönder</button>
+              </div>
+
+              <div className="max-h-[320px] overflow-auto rounded-xl border border-white/10">
+                {targetLists.map(list => (
+                  <div key={list.id} className="border-b border-white/10 px-3 py-3 text-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="font-medium">{list.name}</p>
+                      <button onClick={() => setTargetLists(prev => prev.filter(item => item.id !== list.id))} className="text-red-300"><Trash2 size={14} /></button>
+                    </div>
+                    <p className="text-xs text-slate-400">{list.items.length} kayıt</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {tab === 'templates' && (
             <div className="grid gap-4 lg:grid-cols-2">
               <form onSubmit={e => { e.preventDefault(); if (!newTemplate.name || !newTemplate.content) return; setTemplates(prev => [{ id: `t_${Date.now()}`, name: newTemplate.name, content: newTemplate.content }, ...prev]); setNewTemplate({ name: '', content: '' }); }} className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -497,12 +642,29 @@ export default function App() {
               <input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm" />
               <div className="max-h-[360px] overflow-auto rounded-xl border border-white/10">
                 {scheduled.map(item => (
-                  <div key={item.id} className="flex items-center justify-between border-b border-white/5 px-3 py-2 text-sm">
-                    <div>
-                      <p>{item.targetName}</p>
-                      <p className="text-xs text-slate-400">{new Date(item.scheduledTime).toLocaleString('tr-TR')}</p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-xs ${item.status === 'pending' ? 'bg-amber-400/20 text-amber-300' : item.status === 'sent' ? 'bg-emerald-400/20 text-emerald-300' : 'bg-red-400/20 text-red-300'}`}>{item.status}</span>
+                  <div key={item.id} className="border-b border-white/5 px-3 py-2 text-sm space-y-2">
+                    {editingScheduleId === item.id ? (
+                      <>
+                        <input type="datetime-local" value={editingScheduleDate} onChange={e => setEditingScheduleDate(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs" />
+                        <textarea value={editingScheduleMessage} onChange={e => setEditingScheduleMessage(e.target.value)} className="h-20 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs" />
+                        <div className="flex gap-2">
+                          <button onClick={() => saveScheduleEdit(item.id)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-1 text-xs font-semibold"><Save size={12} /> Kaydet</button>
+                          <button onClick={() => setEditingScheduleId(null)} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-xs">Vazgeç</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p>{item.targetName}</p>
+                          <p className="text-xs text-slate-400">{new Date(item.scheduledTime).toLocaleString('tr-TR')}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-full px-2 py-1 text-xs ${item.status === 'pending' ? 'bg-amber-400/20 text-amber-300' : item.status === 'sent' ? 'bg-emerald-400/20 text-emerald-300' : 'bg-red-400/20 text-red-300'}`}>{item.status}</span>
+                          <button onClick={() => startEditingSchedule(item)} className="text-cyan-300"><Pencil size={14} /></button>
+                          <button onClick={() => deleteSchedule(item.id)} className="text-red-300"><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -530,6 +692,7 @@ export default function App() {
               <p className="mb-4 text-sm text-slate-400">Durum: {waStatus}</p>
               {waSessionId && <p className="mb-4 text-xs text-slate-500">Oturum ID: {waSessionId}</p>}
               {waStatus === 'qr' && waQR ? <img src={waQR} alt="QR" className="mx-auto w-64 rounded-xl border border-emerald-400 bg-white p-2" /> : <p className="text-sm text-slate-400">QR hazır olduğunda burada görünür.</p>}
+              {!isWhatsappReady && <p className="mt-4 text-xs text-amber-300">QR ile giriş tamamlanmadan panel sekmeleri kilitlidir.</p>}
             </div>
           )}
 
@@ -548,7 +711,7 @@ export default function App() {
 
       {isAdminModalOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4">
-          <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-slate-900 p-5">
+          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-900 p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Yönetici Girişi</h2>
               <button onClick={() => setIsAdminModalOpen(false)}><X size={18} /></button>
@@ -560,16 +723,34 @@ export default function App() {
                 <button onClick={handleAdminLogin} className="rounded-lg bg-purple-500 px-4 py-2 text-sm font-semibold">Giriş Yap</button>
               </div>
             ) : (
-              <div className="space-y-3">
-                <button onClick={refreshAdminSessions} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs">Oturumları yenile</button>
-                <div className="max-h-72 overflow-auto rounded-lg border border-white/10">
-                  {adminSessions.map(session => (
-                    <div key={session.id} className="border-b border-white/10 px-3 py-2 text-xs">
-                      <p>{session.id}</p>
-                      <p className="text-slate-400">Durum: {session.status} · Kişi: {session.contactsCount} · Grup: {session.groupsCount}</p>
+              <div className="space-y-4">
+                <div className="space-y-2 rounded-lg border border-white/10 p-3">
+                  <h3 className="font-medium inline-flex items-center gap-2"><Link2 size={14} /> Admin Bağlantı Yönetimi</h3>
+                  {adminLinks.map((link, idx) => (
+                    <div key={link.id} className="grid gap-2 md:grid-cols-[1fr_2fr_auto]">
+                      <input value={link.label} onChange={e => setAdminLinks(prev => prev.map((item, itemIdx) => itemIdx === idx ? { ...item, label: e.target.value } : item))} placeholder="Başlık" className="rounded-lg border border-white/10 bg-slate-800 px-3 py-2 text-xs" />
+                      <input value={link.url} onChange={e => setAdminLinks(prev => prev.map((item, itemIdx) => itemIdx === idx ? { ...item, url: e.target.value } : item))} placeholder="https://..." className="rounded-lg border border-white/10 bg-slate-800 px-3 py-2 text-xs" />
+                      <button onClick={() => setAdminLinks(prev => prev.filter(item => item.id !== link.id))} className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">Sil</button>
                     </div>
                   ))}
+                  <div className="flex gap-2">
+                    <button onClick={() => setAdminLinks(prev => [...prev, { id: `a_${Date.now()}`, label: '', url: '' }])} className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-300">Satır Ekle</button>
+                    <button onClick={saveAdminLinks} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold">Kaydet</button>
+                  </div>
                 </div>
+
+                <div className="space-y-2 rounded-lg border border-white/10 p-3">
+                  <button onClick={refreshAdminSessions} className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs">Oturumları yenile</button>
+                  <div className="max-h-72 overflow-auto rounded-lg border border-white/10">
+                    {adminSessions.map(session => (
+                      <div key={session.id} className="border-b border-white/10 px-3 py-2 text-xs">
+                        <p>{session.id}</p>
+                        <p className="text-slate-400">Durum: {session.status} · Kişi: {session.contactsCount} · Grup: {session.groupsCount}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <button onClick={() => { localStorage.removeItem('wa_admin_token'); setAdminToken(null); setIsAdminLoggedIn(false); }} className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">Admin çıkışı</button>
               </div>
             )}
