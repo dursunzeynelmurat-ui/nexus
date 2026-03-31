@@ -349,7 +349,7 @@ export default function App() {
       setNotification({ message: 'Düzenleme için tarih ve mesaj gereklidir.', type: 'error' });
       return;
     }
-    setScheduled(prev => prev.map(item => (item.id === id ? { ...item, scheduledTime: editingScheduleDate, message: editingScheduleMessage, status: 'pending' } : item)));
+    setScheduled(prev => prev.map(item => (item.id === id ? { ...item, scheduledTime: editingScheduleDate, message: editingScheduleMessage } : item)));
     setEditingScheduleId(null);
     setNotification({ message: 'Planlanan işlem güncellendi.', type: 'success' });
   };
