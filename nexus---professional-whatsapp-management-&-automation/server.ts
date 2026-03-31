@@ -28,7 +28,7 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   // Session management
-  interface Session {
+interface Session {
     sock: any;
     qrCode: string | null;
     connectionStatus: 'connecting' | 'open' | 'close' | 'qr';
@@ -41,6 +41,30 @@ async function startServer() {
 
   const sessions = new Map<string, Session>();
   const GROUP_CACHE_TTL = 5 * 60 * 1000;
+  const ADMIN_LINKS_PATH = "admin_links.json";
+
+  type AdminLink = {
+    id: string;
+    label: string;
+    url: string;
+  };
+
+  const readAdminLinks = (): AdminLink[] => {
+    if (!fs.existsSync(ADMIN_LINKS_PATH)) return [];
+    try {
+      const raw = JSON.parse(fs.readFileSync(ADMIN_LINKS_PATH, "utf-8"));
+      if (!Array.isArray(raw)) return [];
+      return raw
+        .filter((item: any) => typeof item?.id === "string" && typeof item?.label === "string" && typeof item?.url === "string")
+        .map((item: any) => ({ id: item.id, label: item.label, url: item.url }));
+    } catch {
+      return [];
+    }
+  };
+
+  const writeAdminLinks = (links: AdminLink[]) => {
+    fs.writeFileSync(ADMIN_LINKS_PATH, JSON.stringify(links, null, 2));
+  };
 
   const hasAdminConfig = Boolean(ADMIN_USERNAME && ADMIN_PASSWORD);
   if (hasAdminConfig && !ADMIN_TOKEN_SECRET) {
@@ -409,6 +433,29 @@ async function startServer() {
     });
 
     res.json(sessionList);
+  });
+
+  app.get('/api/admin/links', (req, res) => {
+    if (!enforceAdminAuth(req, res)) return;
+    res.json(readAdminLinks());
+  });
+
+  app.put('/api/admin/links', (req, res) => {
+    if (!enforceAdminAuth(req, res)) return;
+    const { links } = req.body || {};
+    if (!Array.isArray(links)) {
+      return res.status(400).json({ error: "links array is required." });
+    }
+    const sanitized = links
+      .filter((item: any) => typeof item?.label === "string" && typeof item?.url === "string")
+      .map((item: any, index: number) => ({
+        id: typeof item.id === "string" && item.id.length > 2 ? item.id : `link_${Date.now()}_${index}`,
+        label: item.label.trim(),
+        url: item.url.trim(),
+      }))
+      .filter((item: AdminLink) => item.label.length > 0 && item.url.length > 0);
+    writeAdminLinks(sanitized);
+    res.json(sanitized);
   });
 
   app.post('/api/admin/logout-session', (req, res) => {
