@@ -511,6 +511,14 @@ export default function App() {
   };
 
   const handleBulkSendGroups = async () => {
+    console.log("Toplu gönderim başlatıldı", {
+      waStatus,
+      selectedGroupsCount: selectedGroups.length,
+      hasTemplate: !!currentTemplate,
+      hasImage: !!selectedImage
+    });
+
+  const handleBulkSendGroups = async () => {
     if (waStatus !== 'open') {
       setNotification({ message: "Lütfen önce WhatsApp bağlantısını kurun.", type: 'error' });
       setActiveTab('whatsapp');
@@ -736,6 +744,10 @@ export default function App() {
     }
   };
 
+  const adminFetch = (url: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers || {});
+    if (adminToken) {
+      headers.set('Authorization', `Bearer ${adminToken}`);
   const adminFetch = (url: string, init: RequestInit = {}, tokenOverride?: string | null) => {
     const headers = new Headers(init.headers || {});
     const tokenToUse = tokenOverride ?? adminToken;
@@ -759,6 +771,10 @@ export default function App() {
       }
 
       const data = await response.json();
+      if (data.token) {
+        localStorage.setItem('wa_admin_token', data.token);
+        setAdminToken(data.token);
+      }
       if (!data.token) {
         setNotification({ message: 'Geçersiz admin yanıtı alındı.', type: 'error' });
         return;
@@ -783,6 +799,10 @@ export default function App() {
   const fetchAdminSessions = async (tokenOverride?: string | null) => {
     setIsAdminLoading(true);
     try {
+      const response = await adminFetch('/api/admin/sessions');
+      if (response.ok) {
+        const data = await response.json();
+        setAdminSessions(data);
       const response = await adminFetch('/api/admin/sessions', {}, tokenOverride);
       if (response.ok) {
         const data = await response.json();
