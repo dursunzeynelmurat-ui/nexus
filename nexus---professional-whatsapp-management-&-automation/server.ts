@@ -20,7 +20,7 @@ async function startServer() {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer);
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
   const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
   const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET;
@@ -346,6 +346,10 @@ async function startServer() {
   }
 
   // API Routes
+  app.get('/healthz', (_req, res) => {
+    res.status(200).json({ ok: true });
+  });
+
   app.get('/api/whatsapp/status', (req, res) => {
     const sessionId = getSessionId(req);
     const session = getOrCreateSession(sessionId);
