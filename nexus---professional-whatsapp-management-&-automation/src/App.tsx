@@ -651,6 +651,43 @@ export default function App() {
             </div>
           )}
 
+          {tab === 'lists' && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <h2 className="mb-2 font-semibold">Liste Oluştur</h2>
+                <p className="mb-3 text-xs text-slate-400">Gruplar ve Rehber sekmelerinde seçtiğiniz kayıtlar bu listeye eklenir.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input value={listName} onChange={e => setListName(e.target.value)} placeholder="Liste adı" className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm" />
+                  <button onClick={createListFromSelection} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white">Seçililerle Listeyi Kaydet</button>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                <h2 className="font-semibold">Listeye Mesaj Gönder</h2>
+                <textarea value={currentMessage} onChange={e => setCurrentMessage(e.target.value)} className="h-24 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm" placeholder="Listeye gönderilecek mesaj taslağı" />
+                <select value={selectedListId} onChange={e => setSelectedListId(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
+                  <option value="">Liste seçin</option>
+                  {targetLists.map(list => (
+                    <option key={list.id} value={list.id}>{list.name} ({list.items.length})</option>
+                  ))}
+                </select>
+                <button disabled={!selectedListId || isSending} onClick={sendToList} className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send size={14} /> Seçili Listeye Gönder</button>
+              </div>
+
+              <div className="max-h-[320px] overflow-auto rounded-xl border border-white/10">
+                {targetLists.map(list => (
+                  <div key={list.id} className="border-b border-white/10 px-3 py-3 text-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="font-medium">{list.name}</p>
+                      <button onClick={() => setTargetLists(prev => prev.filter(item => item.id !== list.id))} className="text-red-300"><Trash2 size={14} /></button>
+                    </div>
+                    <p className="text-xs text-slate-400">{list.items.length} kayıt</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {tab === 'templates' && (
             <div className="grid gap-4 lg:grid-cols-2">
               <form onSubmit={e => { e.preventDefault(); if (!newTemplate.name || !newTemplate.content) return; setTemplates(prev => [{ id: `t_${Date.now()}`, name: newTemplate.name, content: newTemplate.content }, ...prev]); setNewTemplate({ name: '', content: '' }); }} className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
