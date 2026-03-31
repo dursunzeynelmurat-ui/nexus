@@ -17,3 +17,9 @@ npm run dev
   - `ADMIN_USERNAME`
   - `ADMIN_PASSWORD`
   - `ADMIN_TOKEN_SECRET`
+
+## Production deployment
+
+- Bu proje AWS EC2 üzerinde yayınlanmak üzere hazırlanmıştır (Nginx + PM2).
+- Hostinger sadece domain/DNS yönetimi için kullanılmalıdır.
+- Detaylı adımlar için: `nexus---professional-whatsapp-management-&-automation/README.md`.
