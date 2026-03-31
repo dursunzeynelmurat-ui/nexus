@@ -368,14 +368,12 @@ export default function App() {
 
   const fetchWaContacts = async (force = false) => {
     setIsFetchingWaContacts(true);
-    console.log("Fetching WA contacts...");
     try {
       const res = await fetch('/api/whatsapp/contacts', {
         headers: { 'x-client-id': clientId }
       });
       if (res.ok) {
         const data = await res.json();
-        console.log("Fetched", data.length, "WA contacts");
         setWaContacts(data);
         if (data.length === 0 && waStatus === 'open') {
           setNotification({ message: "Rehber henüz senkronize edilmemiş olabilir. Lütfen birkaç saniye sonra tekrar deneyin.", type: 'info' });
@@ -520,6 +518,7 @@ export default function App() {
       hasImage: !!selectedImage
     });
 
+  const handleBulkSendGroups = async () => {
     if (waStatus !== 'open') {
       setNotification({ message: "Lütfen önce WhatsApp bağlantısını kurun.", type: 'error' });
       setActiveTab('whatsapp');
@@ -537,7 +536,6 @@ export default function App() {
 
     setIsSending(true);
     setBulkProgress({ current: 0, total: selectedGroups.length });
-    console.log("Groups to send:", selectedGroups);
     
     try {
       let successCount = 0;
@@ -545,7 +543,6 @@ export default function App() {
         const groupId = selectedGroups[i];
         const group = groups.find(g => g.id === groupId);
         
-        console.log(`Gönderiliyor (${i+1}/${selectedGroups.length}):`, group?.name || groupId, "ID:", groupId);
         setBulkProgress({ current: i + 1, total: selectedGroups.length });
         
         const success = await handleSendNow(
@@ -559,7 +556,6 @@ export default function App() {
         
         if (success) {
           successCount++;
-          console.log(`Başarılı:`, group?.name || groupId);
         } else {
           console.error(`Başarısız:`, group?.name || groupId);
         }
@@ -599,7 +595,6 @@ export default function App() {
 
     setIsSending(true);
     setBulkProgress({ current: 0, total: selectedWaContacts.length });
-    console.log("WA Contacts to send:", selectedWaContacts);
     
     try {
       let successCount = 0;
@@ -607,7 +602,6 @@ export default function App() {
         const contactId = selectedWaContacts[i];
         const contact = waContacts.find(c => c.id === contactId);
         
-        console.log(`Gönderiliyor (${i+1}/${selectedWaContacts.length}):`, contact?.name || contactId, "ID:", contactId);
         setBulkProgress({ current: i + 1, total: selectedWaContacts.length });
         
         const success = await handleSendNow(
@@ -754,6 +748,11 @@ export default function App() {
     const headers = new Headers(init.headers || {});
     if (adminToken) {
       headers.set('Authorization', `Bearer ${adminToken}`);
+  const adminFetch = (url: string, init: RequestInit = {}, tokenOverride?: string | null) => {
+    const headers = new Headers(init.headers || {});
+    const tokenToUse = tokenOverride ?? adminToken;
+    if (tokenToUse) {
+      headers.set('Authorization', `Bearer ${tokenToUse}`);
     }
     return fetch(url, { ...init, headers });
   };
@@ -776,9 +775,20 @@ export default function App() {
         localStorage.setItem('wa_admin_token', data.token);
         setAdminToken(data.token);
       }
+      if (!data.token) {
+        setNotification({ message: 'Geçersiz admin yanıtı alındı.', type: 'error' });
+        return;
+      }
+
+      localStorage.setItem('wa_admin_token', data.token);
+      setAdminToken(data.token);
+      const sessionFetchSuccess = await fetchAdminSessions(data.token);
+      if (!sessionFetchSuccess) {
+        return;
+      }
+
       setIsAdminLoggedIn(true);
       setShowAdminLogin(false);
-      fetchAdminSessions();
       setNotification({ message: 'Admin girişi başarılı.', type: 'success' });
     } catch (error) {
       console.error(error);
@@ -786,21 +796,28 @@ export default function App() {
     }
   };
 
-  const fetchAdminSessions = async () => {
+  const fetchAdminSessions = async (tokenOverride?: string | null) => {
     setIsAdminLoading(true);
     try {
       const response = await adminFetch('/api/admin/sessions');
       if (response.ok) {
         const data = await response.json();
         setAdminSessions(data);
+      const response = await adminFetch('/api/admin/sessions', {}, tokenOverride);
+      if (response.ok) {
+        const data = await response.json();
+        setAdminSessions(data);
+        return true;
       } else if (response.status === 401) {
         localStorage.removeItem('wa_admin_token');
         setAdminToken(null);
         setIsAdminLoggedIn(false);
         setNotification({ message: 'Admin oturumu sona erdi. Lütfen tekrar giriş yapın.', type: 'error' });
       }
+      return false;
     } catch (error) {
       console.error('Failed to fetch admin sessions:', error);
+      return false;
     } finally {
       setIsAdminLoading(false);
     }
