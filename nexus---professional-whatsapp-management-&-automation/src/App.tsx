@@ -143,6 +143,8 @@ export default function App() {
   const [targetLists, setTargetLists] = useState<TargetList[]>(() => readStorage(`wa_target_lists_${createClientId()}`, []));
   const [listName, setListName] = useState('');
   const [selectedListId, setSelectedListId] = useState('');
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [editingListName, setEditingListName] = useState('');
 
   const [notification, setNotification] = useState<Notification | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -383,6 +385,26 @@ export default function App() {
     await bulkSend(list.items);
   };
 
+  const startEditList = (list: TargetList) => {
+    setEditingListId(list.id);
+    setEditingListName(list.name);
+  };
+
+  const saveListEdit = (id: string) => {
+    if (!editingListName.trim()) {
+      setNotification({ message: 'Liste adı boş olamaz.', type: 'error' });
+      return;
+    }
+    setTargetLists(prev => prev.map(item => (item.id === id ? { ...item, name: editingListName.trim() } : item)));
+    setEditingListId(null);
+    setEditingListName('');
+    setNotification({ message: 'Liste güncellendi.', type: 'success' });
+  };
+
+  const removeItemFromList = (listId: string, itemId: string) => {
+    setTargetLists(prev => prev.map(list => (list.id === listId ? { ...list, items: list.items.filter(item => item.id !== itemId) } : list)));
+  };
+
   const handleLogout = async () => {
     await fetch('/api/whatsapp/logout', { method: 'POST', headers: { 'x-client-id': clientId } });
     setWaStatus('close');
@@ -518,22 +540,42 @@ export default function App() {
           </header>
 
           {tab === 'dashboard' && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {[['WhatsApp', waStatus], ['Rehber', String(contacts.length)], ['Gruplar', String(groups.length)], ['Planlanan', String(scheduled.filter(s => s.status === 'pending').length)]].map(([title, value]) => (
-                <div key={title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-widest text-slate-400">{title}</p>
-                  <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
-                </div>
-              ))}
-              <div className="md:col-span-2 xl:col-span-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-slate-300">
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {[['WhatsApp', waStatus], ['Rehber', String(contacts.length)], ['Gruplar', String(groups.length)], ['Planlanan', String(scheduled.filter(s => s.status === 'pending').length)]].map(([title, value]) => (
+                  <div key={title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-xs uppercase tracking-widest text-slate-400">{title}</p>
+                    <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-slate-300">
                 Mesaj alanına <code>{'{{name}}'}</code> veya <code>{'{{phone}}'}</code> yazarak kişiselleştirme yapabilirsiniz.
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                <h2 className="font-semibold">Panelden Direkt Mesaj Gönder</h2>
+                <textarea value={currentMessage} onChange={e => setCurrentMessage(e.target.value)} className="h-24 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm" placeholder="Seçili listeye gönderilecek mesaj taslağı" />
+                <select value={selectedListId} onChange={e => setSelectedListId(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
+                  <option value="">Liste seçin</option>
+                  {targetLists.map(list => (
+                    <option key={list.id} value={list.id}>{list.name} ({list.items.length})</option>
+                  ))}
+                </select>
+                <button disabled={!selectedListId || isSending} onClick={sendToList} className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send size={14} /> Seçili Listeye Gönder</button>
               </div>
             </div>
           )}
 
           {tab === 'groups' && (
             <div className="space-y-4">
-              <textarea value={currentMessage} onChange={e => setCurrentMessage(e.target.value)} className="h-24 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm" placeholder="Gruplara gönderilecek mesaj" />
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
+                <h2 className="font-semibold">Gruplardan Liste Oluştur</h2>
+                <p className="text-xs text-slate-400">Bu sekme yalnızca seçim yapıp yeni liste oluşturmak içindir.</p>
+                <div className="flex flex-wrap gap-2">
+                  <input value={listName} onChange={e => setListName(e.target.value)} placeholder="Yeni liste adı" className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm" />
+                  <button onClick={createListFromSelection} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white">Seçimden Liste Oluştur</button>
+                </div>
+              </div>
               <div className="max-h-[420px] overflow-auto rounded-xl border border-white/10">
                 {groups.map(group => (
                   <label key={group.id} className="flex cursor-pointer items-center justify-between border-b border-white/5 px-3 py-2 text-sm hover:bg-white/5">
@@ -545,16 +587,19 @@ export default function App() {
                   </label>
                 ))}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button disabled={isSending || selectedGroupRows.length === 0} onClick={() => bulkSend(selectedGroupRows)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send size={14} /> Seçili Gruplara Gönder</button>
-                <button disabled={selectedGroupRows.length === 0} onClick={() => createSchedule(selectedGroupRows[0])} className="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-200">İlk seçiliyi planla</button>
-              </div>
             </div>
           )}
 
           {tab === 'contacts' && (
             <div className="space-y-4">
-              <textarea value={currentMessage} onChange={e => setCurrentMessage(e.target.value)} className="h-24 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm" placeholder="Kişilere gönderilecek mesaj" />
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
+                <h2 className="font-semibold">Rehberden Liste Oluştur</h2>
+                <p className="text-xs text-slate-400">Bu sekme yalnızca seçim yapıp yeni liste oluşturmak içindir.</p>
+                <div className="flex flex-wrap gap-2">
+                  <input value={listName} onChange={e => setListName(e.target.value)} placeholder="Yeni liste adı" className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm" />
+                  <button onClick={createListFromSelection} className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white">Seçimden Liste Oluştur</button>
+                </div>
+              </div>
               <div className="max-h-[420px] overflow-auto rounded-xl border border-white/10">
                 {contacts.map(contact => (
                   <label key={contact.id} className="flex cursor-pointer items-center justify-between border-b border-white/5 px-3 py-2 text-sm hover:bg-white/5">
@@ -566,9 +611,42 @@ export default function App() {
                   </label>
                 ))}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button disabled={isSending || selectedContactRows.length === 0} onClick={() => bulkSend(selectedContactRows)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send size={14} /> Seçili Kişilere Gönder</button>
-                <button disabled={selectedContactRows.length === 0} onClick={() => createSchedule(selectedContactRows[0])} className="rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-200">İlk seçiliyi planla</button>
+            </div>
+          )}
+
+          {tab === 'lists' && (
+            <div className="space-y-4">
+              <h2 className="font-semibold">Mevcut Listeleri Yönet</h2>
+              <div className="max-h-[320px] overflow-auto rounded-xl border border-white/10">
+                {targetLists.map(list => (
+                  <div key={list.id} className="border-b border-white/10 px-3 py-3 text-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                      {editingListId === list.id ? (
+                        <div className="flex w-full items-center gap-2">
+                          <input value={editingListName} onChange={e => setEditingListName(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-1 text-xs" />
+                          <button onClick={() => saveListEdit(list.id)} className="text-emerald-300"><Save size={14} /></button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium">{list.name}</p>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => startEditList(list)} className="text-cyan-300"><Pencil size={14} /></button>
+                            <button onClick={() => setTargetLists(prev => prev.filter(item => item.id !== list.id))} className="text-red-300"><Trash2 size={14} /></button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">{list.items.length} kayıt</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {list.items.slice(0, 12).map(item => (
+                        <span key={`${list.id}_${item.id}`} className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 text-xs">
+                          {item.name}
+                          <button onClick={() => removeItemFromList(list.id, item.id)} className="text-red-300"><X size={11} /></button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
